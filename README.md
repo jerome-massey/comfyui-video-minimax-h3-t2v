@@ -46,10 +46,11 @@ length = length + (5 - (length % 17)) % 17
 
 The text encoder is **`int8_convrot`**, not `nvfp4_awq`.
 
-Runpod Serverless selects by VRAM tier, not GPU model. The 48 GB tier spans Ampere
-(A40, RTX A6000) and Ada (L40, L40S), and you cannot pin the architecture. NVFP4 is
-Blackwell-native; on Ampere and Ada it only emulates. ComfyUI reports this directly
-at load time:
+Runpod splits 48 GB into two selectable pools — `AMPERE_48` (A40, RTX A6000) and
+`ADA_48_PRO` (L40, L40S, RTX 6000 Ada) — so the architecture *can* be pinned. It
+still should not be pinned to Blackwell-only for this reason: NVFP4 is
+Blackwell-native and merely emulates on both of these pools. ComfyUI reports this
+directly at load time:
 
 ```
 Native ops: int8_tensorwise, convrot_w4a4 , emulated ops: nvfp4, float8_e4m3fn, ...
@@ -75,22 +76,54 @@ which is what keeps 46 GB of weights inside a 48 GB card. Higher `megapixels` va
 
 Sampling dominates, so reducing `steps` saves far more than optimising model loading.
 
-## Build it yourself
+## Deploying
 
-```bash
-docker build -t minimax-h3-t2v .
+The weights are **not** in the image. They live on a Runpod network volume, which
+keeps the image around 12 GB instead of 55 GB — small enough to build on a free CI
+runner, and not re-pulled onto every new worker machine.
+
+### 1. Image
+
+Pushing to `main` builds `ghcr.io/jerome-massey/comfyui-video-minimax-h3-t2v:latest`
+via `.github/workflows/build.yml`. The GHCR package must be **public**, or the
+endpoint needs a container registry credential to pull it.
+
+### 2. Volume
+
+Create a network volume of at least 60 GB, then populate it once by pointing a
+throwaway endpoint's start command at `/fetch-models.sh` with the volume attached.
+The script is idempotent, so a re-run only fills in what is missing.
+
+The layout it produces is the `Comfy-Org/MiniMax-H3` repo structure verbatim:
+
+```
+/runpod-volume/models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
+/runpod-volume/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+/runpod-volume/models/vae/minimax_h3_video_vae_fp16.safetensors
+/runpod-volume/models/vae/minimax_h3_audio_vae_fp32.safetensors
 ```
 
-The image is large (~55 GB) because the four model files total 51 GB. For several
-endpoints sharing these weights, move the models to a Runpod network volume mounted
-at `/runpod-volume/models/` and drop the download layers instead.
+`extra_model_paths.yaml` names those categories directly. The base image's own copy
+uses the legacy `unet:`/`clip:` keys instead — which do resolve, since
+`add_model_folder_path()` maps `unet`→`diffusion_models` and `clip`→`text_encoders`,
+but they'd force the volume into directory names that match nothing upstream.
+
+### 3. Endpoint
+
+A network volume is tied to one datacenter and pins the endpoint with it, so the
+volume's datacenter has to be one that actually has 48 GB stock. That is a real
+constraint: **CA-MTL-1 and EU-SE-1 have the best 48 GB availability but support no
+network volumes at all.** The datacenters where both are possible are CA-MTL-3
+(`AMPERE_48`), and US-IL-1, US-TX-3 and EU-NL-1 (`ADA_48_PRO`).
 
 ## Known-good versions
 
 - ComfyUI **v0.30.0** — first release containing `comfy_extras/nodes_minimax_h3.py`
   (PR Comfy-Org/ComfyUI#15224, merged 2026-08-03). `worker-comfyui` pins 0.29.0,
   which does **not** have the H3 nodes; the Dockerfile upgrades it.
-- Base image `runpod/worker-comfyui:5.8.7-base` — supplies `/handler.py` and `/start.sh`.
+- Base image `runpod/worker-comfyui:5.8.6-base` — supplies `/handler.py` and
+  `/start.sh`. Note 5.8.7 does **not** exist; an earlier revision of this repo
+  pinned it and could never have built.
 
 If Runpod's repo scanner warns that `runpod.serverless.start()` is missing, ignore it.
 The handler lives in the base image, which the scanner cannot see into.
