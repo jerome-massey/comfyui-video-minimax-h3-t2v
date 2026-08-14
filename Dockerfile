@@ -13,12 +13,31 @@ ARG COMFYUI_VERSION=v0.30.0
 # comfy-cli installs ComfyUI by cloning into /comfyui, so this is a git checkout.
 # PATH already points at the base image's venv (/opt/venv/bin), so pip is the
 # venv's pip and the upgraded requirements land where ComfyUI actually runs.
+#
+# requirements.txt lists torch, torchvision and torchaudio unpinned. Installing
+# them replaces the base image's CUDA 12.8 stack with the default PyPI build,
+# which is CUDA 13, and that build refuses to start on Runpod hosts whose driver
+# reports 12.6:
+#
+#   FAIL: The NVIDIA driver on your system is too old (found version 12060)
+#
+# The worker then crash-loops in start.sh's GPU pre-flight and jobs sit
+# IN_QUEUE forever. Runpod builds worker-comfyui against 12.8 for their own
+# fleet, so the base image's stack is the one that matches the hosts — filter
+# the three out and keep it. `torchsde` is deliberately not matched.
 RUN cd /comfyui \
  && git fetch --depth 1 origin refs/tags/${COMFYUI_VERSION}:refs/tags/${COMFYUI_VERSION} \
  && git checkout ${COMFYUI_VERSION} \
- && pip install --no-cache-dir -r requirements.txt \
+ && grep -viE '^(torch|torchvision|torchaudio)[[:space:]]*$' requirements.txt > /tmp/req-no-torch.txt \
+ && pip install --no-cache-dir -r /tmp/req-no-torch.txt \
  && test -f comfy_extras/nodes_minimax_h3.py \
       || (echo "FATAL: MiniMax H3 nodes missing after upgrade to ${COMFYUI_VERSION}" >&2; exit 1)
+
+# Catch a CUDA-13 torch at build time rather than as a crash-looping worker.
+RUN python -c "import torch, torchvision, torchaudio; \
+print('torch', torch.__version__, 'torchvision', torchvision.__version__, 'cuda', torch.version.cuda); \
+assert torch.version.cuda and torch.version.cuda.startswith('12.'), \
+  'expected a CUDA 12.x torch, got ' + str(torch.version.cuda)"
 
 # --- Point ComfyUI at the volume, and ship the one-time populator ---
 # extra_model_paths.yaml overwrites the base image's copy. ComfyUI reads it
