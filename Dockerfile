@@ -20,23 +20,29 @@ RUN cd /comfyui \
  && test -f comfy_extras/nodes_minimax_h3.py \
       || (echo "FATAL: MiniMax H3 nodes missing after upgrade to ${COMFYUI_VERSION}" >&2; exit 1)
 
+# --- Point ComfyUI at the volume, and ship the one-time populator ---
+# extra_model_paths.yaml overwrites the base image's copy. ComfyUI reads it
+# automatically from its base directory, and start.sh never regenerates it.
+COPY extra_model_paths.yaml /comfyui/extra_model_paths.yaml
+COPY fetch-models.sh /fetch-models.sh
+RUN chmod +x /fetch-models.sh \
+ && pip install --no-cache-dir "huggingface_hub[hf_transfer]>=0.34"
+
 # --- Models are NOT baked into this image ---
 # The four H3 files total 51 GB. Baking them in produced a ~55 GB image, which
 # has to be pulled in full onto every new worker machine and cannot be built on
 # a free CI runner. They live on a Runpod network volume instead, mounted at
 # /runpod-volume, which keeps this image around 12 GB.
 #
-# The base image ships /comfyui/extra_model_paths.yaml pointing at
-# /runpod-volume/models with the legacy keys `unet:` and `clip:`. Those are not
-# dead: folder_paths.add_model_folder_path() runs them through map_legacy(),
-# which rewrites unet -> diffusion_models and clip -> text_encoders — the folder
-# names UNETLoader and CLIPLoader actually read. So the volume must be laid out
-# with the legacy directory names:
+# Expected volume layout, which is just the Comfy-Org/MiniMax-H3 repo structure
+# reproduced under models/ — see extra_model_paths.yaml:
 #
-#   /runpod-volume/models/unet/minimax_h3_fl2va_pruned_int8_convrot.safetensors
-#   /runpod-volume/models/clip/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+#   /runpod-volume/models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors
+#   /runpod-volume/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
 #   /runpod-volume/models/vae/minimax_h3_video_vae_fp16.safetensors
 #   /runpod-volume/models/vae/minimax_h3_audio_vae_fp32.safetensors
+#
+# Run /fetch-models.sh once with the volume attached to create it.
 #
 # Text encoder is int8_convrot, NOT nvfp4_awq. NVFP4 is Blackwell-native and only
 # emulates on Ampere and Ada — ComfyUI reports "Native ops: int8_tensorwise,
