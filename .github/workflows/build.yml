@@ -2,7 +2,9 @@ name: Build worker image
 
 on:
   push:
-    branches: [main]
+    # serverless-volume-worker is temporary: it lets the image be built and the
+    # endpoint proven before any of this reaches main. Drop it before merging.
+    branches: [main, serverless-volume-worker]
     paths:
       - Dockerfile
       - .github/workflows/build.yml
