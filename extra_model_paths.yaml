@@ -1,0 +1,16 @@
+# Points ComfyUI at the models on the Runpod network volume (/runpod-volume).
+#
+# This replaces the one the base image ships, which uses the legacy keys `unet:`
+# and `clip:`. Those do work — folder_paths.add_model_folder_path() runs every
+# key through map_legacy(), rewriting unet -> diffusion_models and
+# clip -> text_encoders — but naming the categories directly means the volume
+# layout matches the Comfy-Org/MiniMax-H3 repo structure exactly, so populating
+# it is a plain `hf download --local-dir` with no file shuffling afterwards.
+#
+# ComfyUI loads this automatically from its base directory; start.sh does not
+# pass --extra-model-paths-config.
+runpod_worker_comfy:
+  base_path: /runpod-volume
+  diffusion_models: models/diffusion_models/
+  text_encoders: models/text_encoders/
+  vae: models/vae/

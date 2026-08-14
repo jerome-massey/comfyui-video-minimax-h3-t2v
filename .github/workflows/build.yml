@@ -1,0 +1,67 @@
+name: Build worker image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Everything COPYed into the image, or the image goes stale without saying so.
+      - Dockerfile
+      - extra_model_paths.yaml
+      - fetch-models.sh
+      - .github/workflows/build.yml
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+# Overlapping runs push to the same :buildcache tag and clobber each other's
+# layers, so supersede an in-flight build rather than racing it.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # The base image alone is ~12 GB compressed and roughly twice that on disk.
+      # A stock runner does not have room for it plus the upgraded requirements,
+      # so reclaim the preinstalled toolchains we do not use.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: false
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          # Cache to the registry rather than the runner: the local layer cache
+          # would blow the disk budget the cleanup step just recovered.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max

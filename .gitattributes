@@ -1,0 +1,6 @@
+# Shell scripts run inside a Linux container. A CRLF checkout on Windows that
+# made it into a commit would fail at runtime with `bad interpreter: ...^M`,
+# so pin them to LF regardless of the committer's platform.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
