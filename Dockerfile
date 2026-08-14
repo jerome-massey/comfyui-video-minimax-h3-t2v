@@ -40,8 +40,13 @@ RUN cd /comfyui \
 # datacenter. The versions are the same ones the base image had, so this is a
 # rebuild against an older CUDA rather than a downgrade of torch itself.
 # (torchaudio 2.11.0 is the newest that exists on any index, cu130 included.)
+#
+# The +cu126 local version is required, not decoration. PEP 440 ignores the
+# local segment when matching, so `torch==2.12.0` is satisfied by the installed
+# 2.12.0+cu130 and pip reports "Requirement already satisfied" and changes
+# nothing — the build then still ships a CUDA 13 stack.
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu126 \
-      torch==2.12.0 torchvision==0.27.0 torchaudio==2.11.0
+      torch==2.12.0+cu126 torchvision==0.27.0+cu126 torchaudio==2.11.0+cu126
 
 # Catch a CUDA-13 torch at build time rather than as a crash-looping worker.
 RUN python -c "import torch, torchvision, torchaudio; \
