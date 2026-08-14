@@ -2,9 +2,7 @@ name: Build worker image
 
 on:
   push:
-    # serverless-volume-worker is temporary: it lets the image be built and the
-    # endpoint proven before any of this reaches main. Drop it before merging.
-    branches: [main, serverless-volume-worker]
+    branches: [main]
     paths:
       # Everything COPYed into the image, or the image goes stale without saying so.
       - Dockerfile
@@ -15,6 +13,12 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
+
+# Overlapping runs push to the same :buildcache tag and clobber each other's
+# layers, so supersede an in-flight build rather than racing it.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
