@@ -14,17 +14,8 @@ ARG COMFYUI_VERSION=v0.30.0
 # PATH already points at the base image's venv (/opt/venv/bin), so pip is the
 # venv's pip and the upgraded requirements land where ComfyUI actually runs.
 #
-# requirements.txt lists torch, torchvision and torchaudio unpinned. Installing
-# them replaces the base image's CUDA 12.8 stack with the default PyPI build,
-# which is CUDA 13, and that build refuses to start on Runpod hosts whose driver
-# reports 12.6:
-#
-#   FAIL: The NVIDIA driver on your system is too old (found version 12060)
-#
-# The worker then crash-loops in start.sh's GPU pre-flight and jobs sit
-# IN_QUEUE forever. Runpod builds worker-comfyui against 12.8 for their own
-# fleet, so the base image's stack is the one that matches the hosts — filter
-# the three out and keep it. `torchsde` is deliberately not matched.
+# The torch lines are filtered out of requirements.txt only to stop pip pulling a
+# wheel that the next step immediately replaces. `torchsde` is not matched.
 RUN cd /comfyui \
  && git fetch --depth 1 origin refs/tags/${COMFYUI_VERSION}:refs/tags/${COMFYUI_VERSION} \
  && git checkout ${COMFYUI_VERSION} \
@@ -32,6 +23,25 @@ RUN cd /comfyui \
  && pip install --no-cache-dir -r /tmp/req-no-torch.txt \
  && test -f comfy_extras/nodes_minimax_h3.py \
       || (echo "FATAL: MiniMax H3 nodes missing after upgrade to ${COMFYUI_VERSION}" >&2; exit 1)
+
+# --- Put torch back on CUDA 12 ---
+# The base image ships torch 2.12.0+cu130 despite being built FROM a CUDA 12.8
+# image. A cu130 build refuses to initialise on a Runpod host whose driver
+# reports CUDA 12.6, and US-TX-3 hands out exactly those:
+#
+#   FAIL: The NVIDIA driver on your system is too old (found version 12060)
+#
+# start.sh treats that as fatal, so the worker crash-loops before the handler
+# ever runs and jobs sit IN_QUEUE looking like a capacity shortage.
+#
+# cu126 rather than cu128: a CUDA 12.6 build runs on 12.6, 12.8 and 13.0 drivers
+# alike, so it widens the pool of eligible hosts instead of narrowing it — which
+# matters because the network volume already pins this endpoint to one
+# datacenter. The versions are the same ones the base image had, so this is a
+# rebuild against an older CUDA rather than a downgrade of torch itself.
+# (torchaudio 2.11.0 is the newest that exists on any index, cu130 included.)
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu126 \
+      torch==2.12.0 torchvision==0.27.0 torchaudio==2.11.0
 
 # Catch a CUDA-13 torch at build time rather than as a crash-looping worker.
 RUN python -c "import torch, torchvision, torchaudio; \
