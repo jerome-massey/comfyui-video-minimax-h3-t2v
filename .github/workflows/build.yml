@@ -6,7 +6,10 @@ on:
     # endpoint proven before any of this reaches main. Drop it before merging.
     branches: [main, serverless-volume-worker]
     paths:
+      # Everything COPYed into the image, or the image goes stale without saying so.
       - Dockerfile
+      - extra_model_paths.yaml
+      - fetch-models.sh
       - .github/workflows/build.yml
   workflow_dispatch:
 
